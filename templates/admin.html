@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Panel</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Panel</h1>
+        <a href="/chat/TeamDev">Back to Chat</a>
+        <h2>Create Group</h2>
+        <form method="post" action="/admin/create_group">
+            <input type="text" name="name" placeholder="Group Name" required>
+            <input type="text" name="description" placeholder="Description">
+            <input type="text" name="tagline" placeholder="Tagline">
+            <label><input type="checkbox" name="verified"> Verified</label>
+            <label><input type="checkbox" name="allow_text" checked> Allow Text</label>
+            <label><input type="checkbox" name="allow_media" checked> Allow Media</label>
+            <label><input type="checkbox" name="allow_file" checked> Allow Files</label>
+            <label><input type="checkbox" name="allow_audio" checked> Allow Audio</label>
+            <button type="submit">Create</button>
+        </form>
+
+        <h2>Groups</h2>
+        <ul>
+            {% for g in groups %}
+            <li>
+                {{ g.name }} 
+                <a href="/admin/delete_group/{{ g.id }}">Delete</a>
+                <a href="/admin/add_all_to_group/{{ g.id }}">Add All Users</a>
+                <a href="/admin/toggle_permission/{{ g.id }}/allow_text">Toggle Text ({{ 'On' if g.allow_text else 'Off' }})</a>
+                <a href="/admin/toggle_permission/{{ g.id }}/allow_media">Toggle Media ({{ 'On' if g.allow_media else 'Off' }})</a>
+                <a href="/admin/toggle_permission/{{ g.id }}/allow_file">Toggle File ({{ 'On' if g.allow_file else 'Off' }})</a>
+                <a href="/admin/toggle_permission/{{ g.id }}/allow_audio">Toggle Audio ({{ 'On' if g.allow_audio else 'Off' }})</a>
+            </li>
+            {% endfor %}
+        </ul>
+
+        <h2>Users</h2>
+        <ul>
+            {% for u in users %}
+            <li>
+                {{ u.name }} ({{ u.email }})
+                {% if u.banned %}
+                <a href="/admin/unban/{{ u.id }}">Unban</a>
+                {% else %}
+                <a href="/admin/ban/{{ u.id }}">Ban</a>
+                {% endif %}
+                {% if u.muted %}
+                <a href="/admin/unmute/{{ u.id }}">Unmute</a>
+                {% else %}
+                <a href="/admin/mute/{{ u.id }}">Mute</a>
+                {% endif %}
+                <a href="/admin/delete_user/{{ u.id }}">Delete</a>
+            </li>
+            {% endfor %}
+        </ul>
+
+        <h2>Add User</h2>
+        <form method="post" action="/admin/add_user">
+            <input type="text" name="name" placeholder="Username" required>
+            <input type="email" name="email" placeholder="Email" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Add</button>
+        </form>
+
+        <h2>Logs</h2>
+        <ul>
+            {% for log in logs %}
+            <li>{{ log.created_at }} - {{ log.by_name }}: {{ log.action }} - {{ log.details }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>
