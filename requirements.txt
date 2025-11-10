@@ -1,4 +1,11 @@
-flask
-supabase
+Flask
 uvicorn
-a2wsgi
+psycopg2-binary
+Flask-SQLAlchemy
+Flask-Login
+Flask-Admin
+bcrypt
+eventlet
+markdown
+bleach
+gunicorn
