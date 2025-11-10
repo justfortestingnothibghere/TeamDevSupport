@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat - {{ group.name }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Groups</h2>
+        <ul id="group-list"></ul>
+    </div>
+    <div class="chat-container">
+        <h1>{{ group.name }}{% if group.verified %} <img src="/static/icons/verified.svg" class="verified-badge">{% endif %}</h1>
+        <p>{{ group.description }} - {{ group.tagline }}</p>
+        <div id="chat-messages"></div>
+        <input id="message-input" type="text" placeholder="Type a message...">
+        <button id="send-button">Send</button>
+        <input id="file-input" type="file">
+        <button id="record-button">Record Audio</button>
+        <a href="/logout">Logout</a>
+        {% if current_user.email == 'armanhacker900@gmail.com' %}
+        <a href="/admin">Admin Panel</a>
+        {% endif %}
+    </div>
+    <script>
+        const supabaseUrl = '{{ supabase_url }}';
+        const anonKey = '{{ anon_key }}';
+        const accessToken = '{{ access_token }}';
+        const groupId = '{{ group.id }}';
+        const currentUser = {{ current_user | tojson }};
+
+        const supabase = Supabase.createClient(supabaseUrl, anonKey);
+        supabase.auth.setAuth(accessToken);
+
+        const chatMessages = document.getElementById('chat-messages');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const fileInput = document.getElementById('file-input');
+        const recordButton = document.getElementById('record-button');
+        const groupList = document.getElementById('group-list');
+
+        let recorder;
+        let recording = false;
+
+        async function appendMessage(msg) {
+            const userResponse = await supabase.from('users').select('name, verified').eq('id', msg.sender_id).single();
+            const sender = userResponse.data;
+            let html = `<div class="message">`;
+            html += `<span class="username">${sender.name}</span>`;
+            if (sender.verified) html += `<img src="/static/icons/verified.svg" class="verified-badge">`;
+            if (sender.name === 'Admin') html += `<span class="tag">Official Account</span>`;
+            html += `: `;
+            if (msg.type === 'text') {
+                html += marked.parse(msg.content);
+            } else if (msg.type === 'media') {
+                if (msg.content.includes('.mp4') || msg.content.includes('.webm')) {
+                    html += `<video src="${msg.content}" controls width="200"></video>`;
+                } else {
+                    html += `<img src="${msg.content}" width="200">`;
+                }
+            } else if (msg.type === 'audio') {
+                html += `<audio src="${msg.content}" controls></audio>`;
+            } else if (msg.type === 'file') {
+                html += `<a href="${msg.content}" download>Download File</a>`;
+            }
+            html += `</div>`;
+            chatMessages.innerHTML += html;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Load initial messages
+        fetch(`/api/messages?group_id=${groupId}`)
+            .then(res => res.json())
+            .then(messages => {
+                messages.forEach(appendMessage);
+            });
+
+        // Realtime subscription
+        supabase.channel('public:messages')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `group_id=eq.${groupId}` }, async (payload) => {
+                await appendMessage(payload.new);
+            })
+            .subscribe();
+
+        // Load groups
+        fetch('/api/groups')
+            .then(res => res.json())
+            .then(groups => {
+                groups.forEach(g => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<a href="/chat/${g.name}">${g.name}</a>`;
+                    groupList.appendChild(li);
+                });
+            });
+
+        // Send text
+        async function sendMessage() {
+            const content = messageInput.value.trim();
+            if (!content) return;
+            const { error } = await supabase.from('messages').insert({
+                group_id: groupId,
+                sender_id: currentUser.id,
+                content,
+                type: 'text'
+            });
+            if (!error) messageInput.value = '';
+        }
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+
+        // Upload file
+        async function uploadFile(file) {
+            const fileExt = file.name.split('.').pop();
+            const filePath = `${groupId}/${crypto.randomUUID()}.${fileExt}`;
+            const { error: uploadError } = await supabase.storage.from('messages').upload(filePath, file);
+            if (uploadError) return;
+            const { data } = supabase.storage.from('messages').getPublicUrl(filePath);
+            let type = 'file';
+            if (file.type.startsWith('image/') || file.type.startsWith('video/')) type = 'media';
+            else if (file.type.startsWith('audio/')) type = 'audio';
+            await supabase.from('messages').insert({
+                group_id: groupId,
+                sender_id: currentUser.id,
+                content: data.publicUrl,
+                type
+            });
+        }
+        fileInput.addEventListener('change', e => {
+            if (e.target.files[0]) uploadFile(e.target.files[0]);
+        });
+
+        // Record audio
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            recorder = new MediaRecorder(stream);
+            let chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = async () => {
+                const blob = new Blob(chunks, { type: 'audio/webm' });
+                chunks = [];
+                await uploadFile(blob);
+            };
+        });
+        recordButton.addEventListener('mousedown', () => {
+            if (recorder) recorder.start();
+        });
+        recordButton.addEventListener('mouseup', () => {
+            if (recorder) recorder.stop();
+        });
+    </script>
+</body>
+  </html>
