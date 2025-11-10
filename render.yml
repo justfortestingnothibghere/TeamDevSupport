@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: built-in-group
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --worker-class eventlet -w 1
+    envVars:
+      DATABASE_URL: postgresql://appuser:@team@dev@dpg-d43tb6ripnbc73caq2vg-a.oregon-postgres.render.com/built_in_group_db
+      SECRET_KEY: dcd40a31e6ff82b2e4cd75ceb0fcf4b1
