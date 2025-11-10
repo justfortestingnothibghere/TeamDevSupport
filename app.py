@@ -36,7 +36,7 @@ def log_action(action, details, by_user_id):
         'created_at': datetime.utcnow().isoformat()
     }).execute()
 
-@app.before_first_request
+@app.before_request
 def initialize():
     # Create admin if not exists
     try:
