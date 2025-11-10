@@ -1,19 +1,23 @@
+# === PATCH EVENTLET FIRST! (MUST BE AT THE VERY TOP) ===
+import eventlet
+eventlet.monkey_patch(all=True)  # <-- Fixes the monkey_patch error on Render
+
+# === NOW IMPORT EVERYTHING ELSE ===
 import os
 import bcrypt
 import markdown
 import bleach
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_from_directory, Response, flash
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory, Response, flash
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
 from queue import Queue
 from threading import Lock
-import eventlet
-eventlet.monkey_patch()
 
+# === FLASK APP SETUP ===
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dcd40a31e6ff82b2e4cd75ceb0fcf4b1')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'change-me-in-production')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL').replace("postgres://", "postgresql://")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -26,7 +30,7 @@ login_manager.login_view = 'login'
 queues = {}
 queues_lock = Lock()
 
-# ===================== MODELS =====================
+# === MODELS ===
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
@@ -57,7 +61,7 @@ class Message(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# ===================== ADMIN PANEL =====================
+# === ADMIN PANEL ===
 class SecureModelView(ModelView):
     def is_accessible(self):
         return current_user.is_authenticated and current_user.is_admin
@@ -73,36 +77,37 @@ admin.add_view(SecureModelView(User, db.session))
 admin.add_view(SecureModelView(Group, db.session))
 admin.add_view(SecureModelView(Message, db.session))
 
-# ===================== INIT DB & DEFAULT DATA =====================
-@app.before_first_request
-def init_db():
-    db.create_all()
-    # Create TeamDev
-    if not Group.query.filter_by(name='TeamDev').first():
-        teamdev = Group(
-            name='TeamDev',
-            description='Official verified developer group of Built-in-Group',
-            tagline='We Build The Future Together 💻✨',
-            verified=True,
-            created_by='system'
-        )
-        db.session.add(teamdev)
-        db.session.commit()
+# === INIT DB & DEFAULT DATA (WITH APP CONTEXT!) ===
+def create_defaults():
+    with app.app_context():  # <-- FIXED: Now inside context
+        db.create_all()
 
-    # Create Admin
-    if not User.query.filter_by(email='armanhacker900@gmail.com').first():
-        hashed = bcrypt.hashpw('@team#dev'.encode(), bcrypt.gensalt())
-        admin_user = User(
-            name='ArmanHacker',
-            email='armanhacker900@gmail.com',
-            password=hashed.decode(),
-            verified=True,
-            is_admin=True
-        )
-        db.session.add(admin_user)
-        db.session.commit()
+        # TeamDev
+        if not Group.query.filter_by(name='TeamDev').first():
+            teamdev = Group(
+                name='TeamDev',
+                description='Official verified developer group of Built-in-Group',
+                tagline='We Build The Future Together 💻✨',
+                verified=True,
+                created_by='system'
+            )
+            db.session.add(teamdev)
+            db.session.commit()
 
-# ===================== ROUTES =====================
+        # Admin
+        if not User.query.filter_by(email='armanhacker900@gmail.com').first():
+            hashed = bcrypt.hashpw('@team#dev'.encode(), bcrypt.gensalt())
+            admin_user = User(
+                name='ArmanHacker',
+                email='armanhacker900@gmail.com',
+                password=hashed.decode(),
+                verified=True,
+                is_admin=True
+            )
+            db.session.add(admin_user)
+            db.session.commit()
+
+# === ROUTES ===
 @app.route('/')
 def index():
     if current_user.is_authenticated:
@@ -169,8 +174,7 @@ def send(group_id):
         file.save(filename)
         file_url = url_for('uploads', filename=file.filename)
         ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-        if ext in ['png','jpg','jpeg','gif','webp','svg']: msg_type = 'media'
-        elif ext in ['mp4','webm','ogg']: msg_type = 'media'
+        if ext in ['png','jpg','jpeg','gif','webp','svg','mp4','webm','ogg']: msg_type = 'media'
         elif ext in ['pdf','doc','docx','zip','rar']: msg_type = 'file'
         elif ext in ['mp3','wav','ogg']: msg_type = 'audio'
 
@@ -211,25 +215,24 @@ def broadcast(group_id, html):
 
 def render_message(msg):
     user = User.query.get(msg.sender_id)
-    group = Group.query.get(msg.group_id)
-    verified = '<img src="/static/icons/verified.svg" class="verified" alt="✓">' if (user.verified or group.verified) else ''
+    verified = '<img src="/static/icons/verified.svg" class="verified" alt="✓">' if (user.verified or Group.query.get(msg.group_id).verified) else ''
     admin_tag = '<span class="official">Official Account</span>' if user.is_admin else ''
     name = user.name
 
     if msg.type == 'text':
         content = markdown.markdown(msg.content)
     elif msg.type in ['media', 'audio']:
-        if 'audio' in msg.type:
+        if msg.type == 'audio':
             content = f'<audio controls><source src="{msg.content}"></audio>'
         else:
-            content = f'<img src="{msg.content}" loading="lazy" style="max-width:100%;border-radius:12px;">' if 'image' in msg.content else f'<video controls style="max-width:100%;"><source src="{msg.content}"></video>'
+            content = f'<img src="{msg.content}" loading="lazy" style="max-width:100%;border-radius:12px;">' if msg.content.lower().endswith(('.png','.jpg','.jpeg','.gif','.webp')) else f'<video controls style="max-width:100%;"><source src="{msg.content}"></video>'
     else:
         content = f'<a href="{msg.content}" target="_blank" class="file-link">📎 {msg.type.upper()} File</a>'
 
     own = 'own' if msg.sender_id == current_user.id else ''
     return f'<div class="message {own}"><span class="name">{name}{verified} {admin_tag}</span><div class="bubble">{content}</div></div>'
 
+# === RUN ===
 if __name__ == '__main__':
-    with app.app_context():
-        init_db()
+    create_defaults()  # <-- Now safe
     app.run(debug=False)
